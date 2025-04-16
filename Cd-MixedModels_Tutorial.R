@@ -1,12 +1,12 @@
 #_____________________________________________________________________________________________
 #_____________________________________________________________________________________________
 ########## Linear Mixed Effects Models Tutorial ###########
-########## UCSB R Seminar - Jan 2024 ######################
+########## UCSB R Seminar  ######################
 #_____________________________________________________________________________________________
 #_____________________________________________________________________________________________
 
 # written by LDL Anderegg
-# last updated 18 Jan 2024
+# last updated 16 Apr 2025
 
 # GOAL: Demonstrate how and why we use linear mixed effects models, as well as model selection techniques
 
@@ -20,16 +20,22 @@
 # install.packages("ggplot2")
 # install.packages("RColorBrewer")
 # install.packages("car")
+# install.packages("MuMIn")
 
-library(nlme)
-library(lme4)
-library(lmerTest)
+library(nlme) # oldie but goodie, uses lme()
+library(lme4) # newer workhorse, but doesn't have alternative variance formulations
+library(lmerTest) # expands lme4 and gives you p-values in output (though beware these!)
 library(ggplot2)
 library(RColorBrewer)
 library(car)
+library(MuMIn) # package for performing multi-model inference, or doing automated model selection
 
+
+# make two color palettes, a light and a dark one
+mypal <- brewer.pal(n=8, "Dark2")
+mypal.light <- paste0(mypal, "88")
 #_____________________________________________________________________________________________
-########## BACKGROUND: All (ish) Stats are linear models  and lm example ###########
+########## BACKGROUND: All (ish) Stats are linear models and lm example ###########
 #_____________________________________________________________________________________________
 
 # Fun dragon example cribbed from: https://github.com/ourcodingclub/CC-Linear-mixed-models
@@ -57,13 +63,13 @@ dev.off() # kill the plotting device so we're back to plotting in the viewer
 
 
 ### +++++++ now explore the linear model
-mod1 <- lm(testScore~bodyLength0, dragons) # fit a linear model to the data
+mod1 <- lm(formula = testScore~bodyLength0, data = dragons) # fit a linear model to the data
 mod1 # printing the model object spits out the call and the coefficients
 str(mod1) # but there's a SHITTTON more information stored in the object
 summary(mod1) # the summary function pulls out most of the things we care about
 # and you can easily look at 'model criticism plots' to make sure model assumptions aren't violated
 
-###  Assumptions?
+###  Assumptions? ALWAYS look at model criticism plots!
 
 ## Plot the residuals - the red line should be close to being flat, like the dashed grey line
 
@@ -109,7 +115,7 @@ summary(lm(testScore~mountainRange + bodyLength, dragons))
 # ADVANCED: but you can also get an ANOVA-style p-value from a 'likelihood ratio test'
 mod2 <- lm(testScore~mountainRange + bodyLength, dragons)
 mod1 <- lm(testScore~bodyLength, dragons)
-anova(mod2, mod1) # why is it called anova()? *shrug*
+anova(mod1, mod2) # why is it called anova()? *shrug*
 
 ########### END: lm tutorial ############################
 #_________________________________________________________________
@@ -142,23 +148,22 @@ dragons$bodyLength2 <- scale(dragons$bodyLength)
 
 ## One way to analyse this data would be to try fitting a linear model to all our data, ignoring the sites and the mountain ranges for now.
 
-library(lme4)
-library(dplyr)
-
 basic.lm <- lm(testScore ~ bodyLength2, data = dragons)
 
 summary(basic.lm)
 
 ## Let's plot the data with ggplot2
 
-library(ggplot2)
 
 ggplot(dragons, aes(x = bodyLength, y = testScore)) +
   geom_point()+
   geom_smooth(method = "lm")
 
+### BUT there is STRUCTURE (i.e. non-independence) in our data!!!
 
-## We could also plot it colouring points by mountain range
+#e.g. We could also plot it colouring points by mountain range
+#    dragons within a mountain range are probably more similar in a lot of things (genetics, diet, choice of extra-curriculars) than dragons from different mountains
+#    -> this means dragons are not truly independent in our dataset!
 quartz(width=3, height=3)
 ggplot(dragons, aes(x = bodyLength0, y = testScore, colour = mountainRange))+
   geom_point(size = 1)+
@@ -192,8 +197,13 @@ mod3 <- lm(testScore~bodyLength0 + mountainRange, dragons)
 # now look at the output of that model with summary()
 summary(mod3)
 
+
+
 # let's plot the from your model on top of the data (sorry, going back to base plotting)
+palette(mypal.light) # quick set the palette so our data are plotted in light points
 plot(testScore~bodyLength0, dragons, ylab="Test Score %", xlab="Body Length (m)", pch=16, col=mountainRange, xlim=c(0,84))
+  # you add our model predictions to this figure!
+palette(mypal) # reset palette so predictions are plotted in dark points
 points()
 
 
@@ -203,13 +213,19 @@ points()
   # these can be codes as predictor1 * preidctor2 (main effects and interaction)
   # or as predictor1 + predictor2 (main effects) + predictor1:predictor2 (interaction)
 
-mod4 <- lm()
+mod4 <- lm(testScore~bodyLength0 + mountainRange + bodyLength0*mountainRange, dragons)
 
 # and what does this look like?
 summary(mod4)
 
+palette(mypal.light)
 plot(testScore~bodyLength0, dragons, ylab="Test Score %", xlab="Body Length (m)", pch=16, col=mountainRange, xlim=c(0,84))
-points()
+pallete(mypal)
+points(mod4$fitted.values~mod4$model$bodyLength0, col=mod4$model$mountainRange)
+  # note: you could either use bodyLength0 and mountainRange as the color from the dragons dataset,
+  #       or you can pull them from mod4$model, which stores all the data used in model fitting.
+  #       the advantage of pulling directly from the mod4$model object is that it excludes NAs, which otherwise screw up the relationship between mod4$fitted.values and dragons
+
 
 # so now we know...something?
 # but DOES BODY LENGTH MATTER???
@@ -232,8 +248,10 @@ summary(mod3mm)
 str(mod3mm) # oh boy, 'merMod' objects have a LOT of stuff in them
 
 
+palette(mypal.light)
 plot(testScore~bodyLength0, dragons, ylab="Test Score %", xlab="Body Length (m)", pch=16, col=mountainRange, xlim=c(0,84))
 mod3mm_preds <- predict(mod3mm) # pull out our fitted values
+palette(mypal)
 points(mod3mm_preds~dragons$bodyLength0, col=dragons$mountainRange)
 
 
@@ -246,14 +264,23 @@ help('isSingular')
 summary(mod4mm)
   # This is actually pretty interpretable!
 
+palette(mypal.light)
 plot(testScore~bodyLength0, dragons, ylab="Test Score %", xlab="Body Length (m)", pch=16, col=mountainRange, xlim=c(0,84))
 mod4mm_preds <- predict(mod4mm) # pull out our fitted values
 points(mod4mm_preds~dragons$bodyLength0, col=dragons$mountainRange)
 
 
+### Important: Criticize this model to make sure it's not violating assumptions!
+# residuals 
+qqp(resid(mod4mm))
+# make sure random effects are normal-ish
+mod4ranef <- ranef(mod4mm)
+qqp(mod4ranef$mountainRange$bodyLength)
+qqp(mod4ranef$mountainRange$`(Intercept)`)
 
-
-
+# make sure data is pretty homoskedastic
+boxplot(resid(mod4mm)~dragons$mountainRange)
+plot(resid(mod4mm)~dragons$bodyLength); abline(h=0, col="red")
 
 
 
@@ -454,6 +481,7 @@ dragons$site.unique <- paste(dragons$site, dragons$mountainRange, sep=".")
 dragons$bodyLength_scaled <- scale(dragons$bodyLength)
 dragons$testScore_scaled <- scale(dragons$testScore)
 
+
 ###### 1) Select random effect structure
 # no random effects (have to use gls() from nlme package rather than lm for comparison with lmer objects)
 rand0 <- gls(testScore~bodyLength0*mountainRange, dragons,method = "REML")
@@ -471,14 +499,30 @@ AICc(rand0, rand1, rand2)
 
 # Random Intercepts is best!
 
-###### 2) Select fixed effects
 
+###### 2) Select fixed effects
+mod0 <- lmer(testScore~1 + (1|site.unique), dragons, REML=F)
+mod1 <- lmer(testScore~bodyLength0 + (1|site.unique), dragons, REML=F)
+mod2 <- lmer(testScore~mountainRange + (1|site.unique), dragons, REML=F)
+mod3 <- lmer(testScore~bodyLength0 + mountainRange + (1|site.unique), dragons, REML=F)
+mod4 <- lmer(testScore~bodyLength0*mountainRange + (1|site.unique), dragons, REML=F)
+
+# now use AIC to select the most parsimonious model
+AIC(mod1, mod2, mod3, mod4)
+# general rule: the most parsimonious model is the one with the fewest
+# parameters that is within 2 AIC units of the lowest AIC model
+# differences of <2 AIC units between models are 'not significant' difference
+# (i.e. in a likelihood ratio test, your p-value is usually >0.05)
+
+anova(mod2, mod3)
+anova(mod1, mod2)
 
 
 ###### 3) refit model with REML
-
+mod2best <- lmer(testScore~mountainRange + (1|site.unique), dragons, REML=T)
 
 
 ###### 4) model criticism
-
-
+qqp(resid(mod2best))
+ranefs <- ranef(mod2best)[1]
+qqp(ranefs$site.unique$`(Intercept)`)
